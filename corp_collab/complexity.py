@@ -1,7 +1,8 @@
-"""Corp-Collab: complexity assessment with C1-C4 tiers and time estimation."""
+"""Corp-Collab: complexity assessment with C1-C4 tiers, keyword auto-classification, and time estimation."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -160,3 +161,133 @@ def assess_complexity(
     if subtask_count >= 2:
         return TaskComplexity.for_tier("C2")
     return TaskComplexity.for_tier("C1")
+
+
+# ── Keyword-Based Auto-Classification ────────────────────────────────────────
+
+# Patterns that suggest higher complexity tiers
+_C4_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(cross[- ]?domain|multi[- ]?team|orchestrat|coordinat)", re.I),
+    re.compile(r"\b(architect|redesign|migrat|refactor entire|overhaul)", re.I),
+    re.compile(r"\b(hire|recruit|delegate to|spawn.*agent|sub[- ]?employee)", re.I),
+    re.compile(r"\b(security audit|compliance|regulation|legal review)", re.I),
+]
+
+_C3_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(investigate|diagnos|debug|root cause|troubleshoot)", re.I),
+    re.compile(r"\b(ambiguous|unclear|figure out|explore|research)", re.I),
+    re.compile(r"\b(design|architect|plan|propos|rfc|spec)", re.I),
+    re.compile(r"\b(refactor|rewrite|restructur|reorganiz)", re.I),
+    re.compile(r"\b(integrat|connect.*system|api.*design)", re.I),
+]
+
+_C2_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(implement|build|create|add|develop|write)", re.I),
+    re.compile(r"\b(test|fix|patch|update|modify|change)", re.I),
+    re.compile(r"\b(configur|setup|install|deploy|migrat)", re.I),
+    re.compile(r"\b(review|audit|check|validat|verify)", re.I),
+]
+
+_C1_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(rename|move|copy|delete|remove|clean)", re.I),
+    re.compile(r"\b(list|show|display|print|log|status)", re.I),
+    re.compile(r"\b(toggle|enable|disable|switch|set)", re.I),
+    re.compile(r"\b(read|fetch|get|check|ping|look up)", re.I),
+]
+
+
+def auto_classify(description: str) -> TaskComplexity:
+    """Classify task complexity from natural language description using keyword heuristics.
+
+    Scans description against tiered keyword patterns. Higher tiers win.
+    Falls back to C1 if no patterns match.
+    """
+    description = description.strip()
+    if not description:
+        return TaskComplexity.for_tier("C1")
+
+    # Score each tier by pattern matches
+    scores: dict[str, int] = {"C4": 0, "C3": 0, "C2": 0, "C1": 0}
+
+    for pat in _C4_PATTERNS:
+        if pat.search(description):
+            scores["C4"] += 1
+
+    for pat in _C3_PATTERNS:
+        if pat.search(description):
+            scores["C3"] += 1
+
+    for pat in _C2_PATTERNS:
+        if pat.search(description):
+            scores["C2"] += 1
+
+    for pat in _C1_PATTERNS:
+        if pat.search(description):
+            scores["C1"] += 1
+
+    # Length heuristic: very long descriptions suggest complexity
+    word_count = len(description.split())
+    if word_count > 50:
+        scores["C3"] += 1
+    elif word_count > 100:
+        scores["C4"] += 1
+
+    # Pick highest tier with matches (C4 > C3 > C2 > C1)
+    for tier in ["C4", "C3", "C2", "C1"]:
+        if scores[tier] > 0:
+            return TaskComplexity.for_tier(tier)
+
+    return TaskComplexity.for_tier("C1")
+
+
+def classify_with_context(
+    description: str,
+    subtask_count: int = 1,
+    requires_delegation: bool = False,
+    ambiguous: bool = False,
+) -> TaskComplexity:
+    """Classify using both keyword analysis and explicit context signals.
+
+    Takes the maximum tier from keyword auto-classification and the
+    rule-based assess_complexity function.
+    """
+    keyword_result = auto_classify(description)
+    rule_result = assess_complexity(
+        description,
+        subtask_count=subtask_count,
+        requires_delegation=requires_delegation,
+        ambiguous=ambiguous,
+    )
+
+    # Compare tiers and pick the higher one
+    tier_order = ["C1", "C2", "C3", "C4"]
+    keyword_idx = tier_order.index(keyword_result.tier)
+    rule_idx = tier_order.index(rule_result.tier)
+
+    if keyword_idx >= rule_idx:
+        return keyword_result
+    return rule_result
+
+
+def calibrated_time_estimate(
+    complexity: TaskComplexity,
+    employee_id: str | None = None,
+    base_path: Any = None,
+) -> float:
+    """Return a calibrated time estimate in minutes.
+
+    If employee_id provided and has performance history, uses their
+    historical calibration factor. Otherwise returns the tier default.
+    """
+    base_minutes = complexity.default_estimate_minutes
+
+    if employee_id is not None:
+        try:
+            from .performance import PerformanceTracker
+
+            tracker = PerformanceTracker(employee_id, base_path=base_path)
+            return tracker.calibrated_estimate(base_minutes, tier=complexity.tier)
+        except Exception:
+            pass
+
+    return float(base_minutes)
