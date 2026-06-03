@@ -61,6 +61,7 @@ class Employee:
         custom_manager_title: str | None = None,
         tasks_completed_under_manager: int = 0,
         promotion_level: str = "intern",
+        job_title: str | None = None,
     ) -> None:
         self.id = id
         self.nickname = nickname
@@ -78,6 +79,7 @@ class Employee:
         self.custom_manager_title = custom_manager_title
         self.tasks_completed_under_manager = tasks_completed_under_manager
         self.promotion_level = promotion_level
+        self.job_title = job_title
 
     # ── Factory methods ──────────────────────────────────────────────────
 
@@ -141,6 +143,7 @@ class Employee:
             custom_manager_title=data.get("custom_manager_title"),
             tasks_completed_under_manager=data.get("tasks_completed_under_manager", 0),
             promotion_level=data.get("promotion_level", "intern"),
+            job_title=data.get("job_title"),
         )
 
     # ── Persistence ──────────────────────────────────────────────────────
@@ -184,16 +187,26 @@ class Employee:
             "custom_manager_title": self.custom_manager_title,
             "tasks_completed_under_manager": self.tasks_completed_under_manager,
             "promotion_level": self.promotion_level,
+            "job_title": self.job_title,
         }
 
     # ── Properties ───────────────────────────────────────────────────────
 
     @property
     def full_name(self) -> str:
-        """Display name combining title and nickname."""
+        """Display name combining title and nickname, with optional job title."""
         if self.custom_manager_title:
-            return f"{self.custom_manager_title} {self.nickname}"
-        return f"{self.title} {self.nickname}"
+            base = f"{self.custom_manager_title} {self.nickname}"
+        else:
+            base = f"{self.title} {self.nickname}"
+        if self.job_title:
+            return f"{base} [{self.job_title}]"
+        return base
+
+    def set_job_title(self, job_title: str | None) -> None:
+        """Set or clear the employee's job title (set by manager)."""
+        self.job_title = job_title
+        self.last_active = _utcnow_iso()
 
     @property
     def has_renaming_rights(self) -> bool:
@@ -277,6 +290,11 @@ class Employee:
         """Add a skill to granted_skills if not already present."""
         if skill not in self.granted_skills and skill not in self.skills:
             self.granted_skills.append(skill)
+
+    @staticmethod
+    def _default_skills_for(role: str) -> list[str]:
+        """Return default skill list for a role."""
+        return list(DEFAULT_SKILLS.get(role, []))
 
     def revoke_skill(self, skill: str) -> None:
         """Remove a skill from granted_skills."""

@@ -241,6 +241,22 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
 ]
 
+# ── Job Title tool definition ─────────────────────────────────────────────
+
+TOOL_DEFINITIONS.append({
+    "name": "corp_set_job_title",
+    "description": "Set or clear an employee's job title. Manager-only — must be the employee's manager.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "employee_id": {"type": "string", "description": "Target employee ID"},
+            "manager_id": {"type": "string", "description": "Requesting manager ID"},
+            "job_title": {"type": ["string", "null"], "description": "New job title, or null to clear"},
+        },
+        "required": ["employee_id", "manager_id"],
+    },
+})
+
 # Name → definition lookup
 TOOL_MAP: dict[str, dict[str, Any]] = {t["name"]: t for t in TOOL_DEFINITIONS}
 
@@ -312,6 +328,9 @@ def dispatch(tool_name: str, arguments: dict[str, Any], base_path: str | None = 
 
         elif tool_name == "corp_grant_skill":
             return _grant_skill_dispatch(kwargs)
+
+        elif tool_name == "corp_set_job_title":
+            return _set_job_title_dispatch(kwargs)
 
         else:
             return {"error": f"Unknown tool: {tool_name}"}
@@ -386,6 +405,36 @@ def _grant_skill_dispatch(kwargs: dict[str, Any]) -> dict[str, Any]:
         force=kwargs.get("force", False),
     )
     return {"success": ok, "message": msg}
+
+
+def _set_job_title_dispatch(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Handle job title changes."""
+    from pathlib import Path
+    from corp_collab.roster import Roster
+
+    base = Path(kwargs.pop("base_path", Path.home() / ".claude-code" / "collab"))
+    roster = Roster(base_path=base)
+
+    emp_id = kwargs["employee_id"]
+    mgr_id = kwargs["manager_id"]
+    job_title = kwargs.get("job_title")
+
+    emp = roster.get(emp_id)
+    if not emp:
+        return {"error": f"Employee {emp_id} not found"}
+
+    # Verify caller is the employee's manager
+    if emp.hired_by != mgr_id:
+        return {"error": f"Only {emp.hired_by} can set job title for {emp_id}"}
+
+    emp.set_job_title(job_title)
+    emp.save(base / "employees")
+    return {
+        "success": True,
+        "employee_id": emp_id,
+        "job_title": job_title,
+        "full_name": emp.full_name,
+    }
 
 
 # ── MCP Server Helpers ───────────────────────────────────────────────────────

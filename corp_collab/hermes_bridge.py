@@ -81,6 +81,20 @@ class CorpBridge:
         self.base = Path(base_path) if base_path else DEFAULT_BASE
         self.manager_id = manager_id
         self._active_tasks: dict[str, TaskHandle] = {}
+        self._ensure_manager_registered()
+
+    def _ensure_manager_registered(self) -> None:
+        """Auto-register the manager as an employee if not already present."""
+        from corp_collab.config import get_config
+
+        cfg = get_config(base_path=self.base)
+        if not cfg.auto_register_managers:
+            return
+
+        from corp_collab.roster import Roster
+
+        roster = Roster(base_path=self.base)
+        roster.ensure_manager_employee(self.manager_id)
 
     def assign(
         self,

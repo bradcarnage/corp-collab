@@ -283,7 +283,7 @@ class TestToDict:
             "granted_skills", "can_delegate", "max_subordinates", "hired_by",
             "hired_at", "last_active", "status", "current_task",
             "custom_manager_title", "tasks_completed_under_manager",
-            "promotion_level",
+            "promotion_level", "job_title",
         }
         assert set(d.keys()) == expected_keys
 

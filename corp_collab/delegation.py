@@ -275,14 +275,20 @@ class DelegationManager:
 
 def validate_hierarchy_depth(
     employee_id: str,
-    max_depth: int = 3,
+    max_depth: int | None = None,
     base_path: Path | None = None,
 ) -> bool:
     """Check if employee can delegate without exceeding max hierarchy depth.
 
     Walks up the chain counting levels. Returns True if depth < max_depth.
+    If *max_depth* is None, reads from config (default 10, hard cap 10).
     """
     bp = base_path or Path.home() / ".claude-code" / "collab"
+
+    if max_depth is None:
+        from corp_collab.config import get_config
+        max_depth = get_config(base_path=bp).max_delegation_depth
+
     employees_path = bp / "employees"
     from corp_collab.employee import Employee
 

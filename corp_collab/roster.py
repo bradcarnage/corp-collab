@@ -76,6 +76,48 @@ class Roster:
         """Load an employee from disk."""
         return Employee.load(employee_id, self.employees_path)
 
+    def exists(self, employee_id: str) -> bool:
+        """Check if an employee profile exists on disk."""
+        return (self.employees_path / employee_id / "profile.yaml").exists()
+
+    def ensure_manager_employee(
+        self,
+        manager_id: str,
+        nickname: str | None = None,
+        hired_by: str = "__ceo__",
+    ) -> Employee:
+        """Ensure a manager exists as a registered employee.
+
+        If *manager_id* already has a profile, returns the existing employee.
+        Otherwise creates a new manager-role employee with the given ID
+        (preserving the caller-chosen ID instead of generating one).
+
+        This enables managers to appear in the org chart as real nodes
+        rather than virtual placeholders.
+        """
+        if self.exists(manager_id):
+            return self.get(manager_id)
+
+        from .nicknames import NicknameGenerator
+
+        gen = NicknameGenerator()
+        display_name = nickname or manager_id.replace("-", " ").replace("_", " ").title()
+
+        emp = Employee(
+            id=manager_id,
+            nickname=display_name,
+            role="manager",
+            hired_by=hired_by,
+            title="Manager",
+            skills=list(Employee._default_skills_for("manager")),
+            can_delegate=True,
+            max_subordinates=10,
+            status="active",
+            promotion_level="lead",
+        )
+        self.register(emp)
+        return emp
+
     # ── Listing ──────────────────────────────────────────────────────────
 
     def list_all(

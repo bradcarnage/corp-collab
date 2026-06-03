@@ -791,34 +791,22 @@ function renderOrg(employees) {
   // Build tree
   const byManager = {};
   const roots = [];
+  const empIds = new Set(employees.map(e => e.id));
   employees.forEach(e => {
     const mgr = e.manager_id || '__root__';
     if (!byManager[mgr]) byManager[mgr] = [];
     byManager[mgr].push(e);
-    if (!e.manager_id) roots.push(e);
-  });
-
-  // Find virtual managers (referenced but not in employee list)
-  const empIds = new Set(employees.map(e => e.id));
-  const virtualManagers = new Set();
-  employees.forEach(e => {
-    if (e.manager_id && !empIds.has(e.manager_id)) {
-      virtualManagers.add(e.manager_id);
+    // Root = no manager, or manager is __ceo__, or manager not in employee list
+    if (!e.manager_id || e.manager_id === '__ceo__' || !empIds.has(e.manager_id)) {
+      roots.push(e);
     }
   });
-
-  // If no roots, all have managers — find top-level ones (exclude those under virtual managers)
-  if (!roots.length) {
-    employees.forEach(e => {
-      if (!empIds.has(e.manager_id) && !virtualManagers.has(e.manager_id)) roots.push(e);
-    });
-  }
 
   function renderNode(e, depth) {
     const statusIcon = e.status === 'active' ? '🟢' : e.status === 'idle' ? '🟡' : '⚫';
     let line = `${statusIcon} ${e.full_name} (${e.role}, ${e.title})`;
     if (e.current_task) line += ` — ${e.current_task}`;
-    line += '\n';
+    line += '\\n';
     const children = byManager[e.id] || [];
     children.forEach((c, i) => {
       const isLast = i === children.length - 1;
@@ -829,27 +817,8 @@ function renderOrg(employees) {
     return line;
   }
 
-  function renderVirtualManager(mgrId, depth) {
-    const name = mgrId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    let line = `🤖 ${name} (agent, manager)\n`;
-    const children = byManager[mgrId] || [];
-    children.forEach((c, i) => {
-      const isLast = i === children.length - 1;
-      const connector = isLast ? '└── ' : '├── ';
-      const padding = '    '.repeat(depth);
-      line += padding + connector + renderNode(c, depth + 1);
-    });
-    return line;
-  }
-
   let tree = '👤 CEO (Brad)\n';
-  // Render virtual managers (agent threads that hired employees)
-  const vmArray = [...virtualManagers];
-  vmArray.forEach((mgr, i) => {
-    const isLast = (i === vmArray.length - 1) && !roots.length;
-    tree += (isLast ? '└── ' : '├── ') + renderVirtualManager(mgr, 1);
-  });
-  // Render root employees (no manager or orphaned)
+  // Render root employees (report to CEO or have no manager)
   roots.forEach((r, i) => {
     const isLast = i === roots.length - 1;
     tree += (isLast ? '└── ' : '├── ') + renderNode(r, 1);

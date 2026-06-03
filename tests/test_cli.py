@@ -160,4 +160,4 @@ class TestStatsCmd:
         ret = main(["--base", str(tmp_path), "stats"])
         assert ret == 0
         out = capsys.readouterr().out
-        assert "Total employees: 1" in out
+        assert "Total employees: 2" in out  # engineer + auto-registered manager

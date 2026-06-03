@@ -40,6 +40,12 @@ def hire(
         nickgen = NicknameGenerator()
         roster = Roster(base_path=base)
 
+        # Auto-register manager as employee if needed
+        from corp_collab.config import get_config
+        cfg = get_config(base_path=base)
+        if cfg.auto_register_managers:
+            roster.ensure_manager_employee(manager_id)
+
         # Gather existing nicknames to avoid collisions
         existing = {emp.nickname for emp in roster.list_all()}
         emp = Employee.create(role=role, hired_by=manager_id, nicknames=nickgen, existing_names=existing)
