@@ -129,7 +129,13 @@ def _calculate_warmth(emp: dict) -> float:
             recency_days = (datetime.now(timezone.utc) - hired_dt).days
         except Exception:
             pass
-    return (tasks * 0.3) + (recency_days * -0.1) + (domain_overlap * 0.5)
+    raw = (tasks * 0.3) + (domain_overlap * 0.5)
+    # Newer employees get a small bonus, very old inactive ones decay slightly
+    if recency_days <= 7:
+        raw += 0.2
+    elif recency_days > 30:
+        raw -= min(0.3, recency_days * 0.005)
+    return max(0.0, min(5.0, raw))
 
 
 def api_overview() -> dict:
@@ -371,6 +377,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     padding: 16px;
     cursor: pointer;
     transition: border-color 0.15s, transform 0.1s;
+    display: flex;
+    flex-direction: column;
+    min-height: 120px;
   }
   .emp-card:hover {
     border-color: var(--accent);
@@ -399,6 +408,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
 
   .role-engineer { background: #1f3a5f; color: #58a6ff; }
+  .role-analyst { background: #2d1f4e; color: #bc8cff; }
   .role-researcher { background: #2d1f4e; color: #bc8cff; }
   .role-reviewer { background: #3b2f1a; color: #f0883e; }
   .role-manager { background: #1a3b2f; color: #3fb950; }
@@ -427,7 +437,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 10px;
+    margin-top: auto;
+    padding-top: 10px;
     font-size: 12px;
     color: var(--text-muted);
   }
@@ -453,14 +464,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .status-dot.registered { background: var(--text-muted); }
 
   .warmth-bar {
-    width: 60px;
-    height: 4px;
+    width: 80px;
+    height: 6px;
     background: var(--surface2);
-    border-radius: 2px;
+    border-radius: 3px;
     overflow: hidden;
     display: inline-block;
     vertical-align: middle;
-    margin-left: 4px;
+    margin-left: 6px;
   }
 
   .warmth-bar .fill {
@@ -706,7 +717,8 @@ function switchTab(tab) {
 
 function roleClass(role) {
   if (['engineer','developer','coder'].some(r => (role||'').toLowerCase().includes(r))) return 'role-engineer';
-  if (['research','analyst','data'].some(r => (role||'').toLowerCase().includes(r))) return 'role-researcher';
+  if (['analyst','data'].some(r => (role||'').toLowerCase().includes(r))) return 'role-analyst';
+  if (['research'].some(r => (role||'').toLowerCase().includes(r))) return 'role-researcher';
   if (['review','qa','test'].some(r => (role||'').toLowerCase().includes(r))) return 'role-reviewer';
   if (['manager','lead','director'].some(r => (role||'').toLowerCase().includes(r))) return 'role-manager';
   return 'role-default';
@@ -714,8 +726,10 @@ function roleClass(role) {
 
 function warmthColor(w) {
   if (w >= 2) return 'var(--green)';
+  if (w >= 1) return 'var(--accent)';
   if (w >= 0.5) return 'var(--yellow)';
-  return 'var(--red)';
+  if (w >= 0.2) return 'var(--orange)';
+  return 'var(--text-muted)';
 }
 
 function timeAgo(iso) {
@@ -768,7 +782,7 @@ function renderRoster(employees) {
             <div>
               Warmth: ${e.warmth}
               <div class="warmth-bar">
-                <div class="fill" style="width:${Math.min(100, Math.max(0, (e.warmth+1)*25))}%;background:${warmthColor(e.warmth)}"></div>
+                <div class="fill" style="width:${Math.min(100, Math.max(5, (e.warmth/5)*100))}%;background:${warmthColor(e.warmth)}"></div>
               </div>
             </div>
             <div class="mail-indicator ${e.mail.unread > 0 ? 'has-unread' : ''}">
@@ -806,7 +820,7 @@ function renderOrg(employees) {
     const statusIcon = e.status === 'active' ? '🟢' : e.status === 'idle' ? '🟡' : '⚫';
     let line = `${statusIcon} ${e.full_name} (${e.role}, ${e.title})`;
     if (e.current_task) line += ` — ${e.current_task}`;
-    line += '\\n';
+    line += '\n';
     const children = byManager[e.id] || [];
     children.forEach((c, i) => {
       const isLast = i === children.length - 1;
