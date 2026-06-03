@@ -138,6 +138,35 @@ def _calculate_warmth(emp: dict) -> float:
     return max(0.0, min(5.0, raw))
 
 
+def _effective_status(emp: dict) -> str:
+    """Infer display status from last_active timestamp.
+
+    Profile may say 'active' but if no heartbeat in a while, the agent
+    session has ended.  Use last_active to show a realistic status:
+      - active:   last_active within 5 minutes
+      - idle:     last_active within 1 hour
+      - inactive: last_active older than 1 hour (or missing)
+      - terminated/onboarding: pass through as-is
+    """
+    raw = emp.get("status", "unknown")
+    if raw in ("terminated", "onboarding"):
+        return raw
+    last_active = emp.get("last_active", "")
+    if not last_active:
+        return raw  # no timestamp, trust the profile
+    try:
+        ts = datetime.fromisoformat(str(last_active).replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+    except Exception:
+        return raw
+    if age_seconds < 300:      # 5 min
+        return "active"
+    elif age_seconds < 3600:   # 1 hour
+        return "idle"
+    else:
+        return "inactive"
+
+
 def api_overview() -> dict:
     registry = _load_registry()
     employees = []
@@ -149,7 +178,7 @@ def api_overview() -> dict:
         emp = _load_employee(emp_id)
         if not emp:
             continue
-        status = emp.get("status", meta.get("status", "unknown"))
+        status = _effective_status(emp)
         mail = _load_mailbox_stats(emp_id)
         warmth = _calculate_warmth(emp)
         tasks = emp.get("tasks_completed_under_manager", 0)
@@ -157,7 +186,7 @@ def api_overview() -> dict:
 
         if status == "active":
             active += 1
-        elif status in ("idle", "registered"):
+        elif status in ("idle", "registered", "onboarding"):
             idle += 1
 
         employees.append({
@@ -460,8 +489,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
   .status-dot.active { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .status-dot.idle { background: var(--yellow); }
+  .status-dot.inactive { background: var(--text-muted); }
   .status-dot.terminated { background: var(--red); }
   .status-dot.registered { background: var(--text-muted); }
+  .status-dot.onboarding { background: var(--accent); }
 
   .warmth-bar {
     width: 80px;
@@ -817,7 +848,7 @@ function renderOrg(employees) {
   });
 
   function renderNode(e, depth) {
-    const statusIcon = e.status === 'active' ? '🟢' : e.status === 'idle' ? '🟡' : '⚫';
+    const statusIcon = e.status === 'active' ? '🟢' : e.status === 'idle' ? '🟡' : e.status === 'terminated' ? '🔴' : '⚫';
     let line = `${statusIcon} ${e.full_name} (${e.role}, ${e.title})`;
     if (e.current_task) line += ` — ${e.current_task}`;
     line += '\n';
