@@ -126,8 +126,24 @@ class Roster:
         role: str | None = None,
         manager_id: str | None = None,
     ) -> list[Employee]:
-        """List employees with optional filters on status, role, and manager_id."""
+        """List employees with optional filters on status, role, and manager_id.
+
+        Also auto-registers any orphaned profile directories not yet in the registry.
+        """
         registry = self._load_registry()
+
+        # Auto-register orphaned profile dirs (profiles created outside roster.register)
+        emp_dir = self.base_path / "employees"
+        if emp_dir.is_dir():
+            for profile_dir in emp_dir.iterdir():
+                if profile_dir.is_dir() and profile_dir.name not in registry:
+                    try:
+                        emp = Employee.load(profile_dir.name, emp_dir)
+                        self.register(emp)
+                        registry = self._load_registry()  # refresh
+                    except (FileNotFoundError, Exception):
+                        continue
+
         results: list[Employee] = []
 
         for emp_id, meta in registry.items():
