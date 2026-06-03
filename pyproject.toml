@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "corp-collab"
-version = "0.1.0"
+version = "1.0.0"
 description = "Async AI agent orchestration with a corporate employment metaphor"
 readme = "README.md"
 license = "MIT"
@@ -18,6 +18,9 @@ dependencies = [
     "pyyaml>=6.0",
     "aiosqlite>=0.19.0",
 ]
+
+[project.scripts]
+corp-collab = "corp_collab.cli:main"
 
 [project.optional-dependencies]
 dev = [
