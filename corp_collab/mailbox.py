@@ -1,0 +1,1 @@
+"""Corp-Collab: mailbox module."""

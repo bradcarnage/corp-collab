@@ -1,0 +1,1 @@
+"""Corp-Collab: spawner module."""
