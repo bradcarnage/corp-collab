@@ -138,33 +138,127 @@ def _calculate_warmth(emp: dict) -> float:
     return max(0.0, min(5.0, raw))
 
 
-def _effective_status(emp: dict) -> str:
-    """Infer display status from last_active timestamp.
+def _get_thread_last_active(emp: dict) -> datetime | None:
+    """Check employee's Discord thread for recent activity.
 
-    Profile may say 'active' but if no heartbeat in a while, the agent
-    session has ended.  Use last_active to show a realistic status:
-      - active:   last_active within 5 minutes
-      - idle:     last_active within 1 hour
-      - inactive: last_active older than 1 hour (or missing)
-      - terminated/onboarding: pass through as-is
+    Signal priority:
+      1. Gateway /api/thread-activity endpoint (live Discord bot connection)
+      2. Heartbeat file (written by heartbeat_writer cron every 5min)
+      3. Recent burst records
+
+    Falls through to next signal on failure.
+    """
+    emp_id = emp.get("id", "")
+    if not emp_id:
+        return None
+
+    best_ts = None
+    thread_id = emp.get("thread_id", "")
+
+    # Signal 1: Gateway thread-activity endpoint (live, authoritative)
+    if thread_id:
+        try:
+            import urllib.request
+            url = f"http://127.0.0.1:8644/api/thread-activity?thread_ids={thread_id}"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+                thread_data = data.get("threads", {}).get(thread_id, {})
+                ts_str = thread_data.get("last_message_at")
+                if ts_str:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    if best_ts is None or ts > best_ts:
+                        best_ts = ts
+        except Exception:
+            pass  # Fall through to heartbeat file
+
+    # Signal 2: heartbeat file (written by heartbeat_writer cron)
+    # Contains ISO timestamp of last bot message in employee's Discord thread
+    heartbeat = BASE_PATH / "employees" / emp_id / "heartbeat"
+    if heartbeat.exists():
+        try:
+            ts_str = heartbeat.read_text().strip()
+            if ts_str:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                if best_ts is None or ts > best_ts:
+                    best_ts = ts
+        except Exception:
+            pass
+
+    # Signal 3: recent burst records
+    bursts_dir = BASE_PATH / "bursts"
+    if bursts_dir.exists():
+        try:
+            for burst_file in sorted(bursts_dir.glob("*.yaml"), reverse=True)[:5]:
+                data = yaml.safe_load(burst_file.read_text()) or {}
+                if data.get("employee_id") == emp_id and data.get("status") == "active":
+                    ts_str = data.get("started_at", "")
+                    if ts_str:
+                        ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                        if best_ts is None or ts > best_ts:
+                            best_ts = ts
+                    break  # only check most recent
+        except Exception:
+            pass
+
+    return best_ts
+
+
+# Cache thread status for 60s to avoid rate-limiting Discord API
+_thread_cache: dict[str, tuple[float, str]] = {}
+
+
+def _effective_status(emp: dict) -> str:
+    """Infer display status from last_active timestamp AND thread activity.
+
+    Checks two signals:
+      1. Profile's last_active field (set by corp-collab heartbeat)
+      2. Employee's Discord thread last message (catches active sessions
+         that don't heartbeat to corp-collab, like cron-spawned agents)
+
+    Uses the MORE RECENT of the two signals.
     """
     raw = emp.get("status", "unknown")
     if raw in ("terminated", "onboarding"):
         return raw
+
+    emp_id = emp.get("id", "")
+
+    # Check cache first
+    now = time.time()
+    if emp_id in _thread_cache:
+        cached_time, cached_status = _thread_cache[emp_id]
+        if now - cached_time < 60:
+            return cached_status
+
+    # Signal 1: profile last_active
+    best_ts = None
     last_active = emp.get("last_active", "")
-    if not last_active:
-        return raw  # no timestamp, trust the profile
-    try:
-        ts = datetime.fromisoformat(str(last_active).replace("Z", "+00:00"))
-        age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
-    except Exception:
-        return raw
+    if last_active:
+        try:
+            best_ts = datetime.fromisoformat(str(last_active).replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    # Signal 2: Discord thread last message
+    thread_ts = _get_thread_last_active(emp)
+    if thread_ts:
+        if best_ts is None or thread_ts > best_ts:
+            best_ts = thread_ts
+
+    if best_ts is None:
+        return raw  # no signals, trust profile
+
+    age_seconds = (datetime.now(timezone.utc) - best_ts).total_seconds()
     if age_seconds < 300:      # 5 min
-        return "active"
+        status = "active"
     elif age_seconds < 3600:   # 1 hour
-        return "idle"
+        status = "idle"
     else:
-        return "inactive"
+        status = "inactive"
+
+    _thread_cache[emp_id] = (now, status)
+    return status
 
 
 def api_overview() -> dict:
